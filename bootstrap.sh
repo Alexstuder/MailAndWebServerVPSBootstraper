@@ -120,6 +120,15 @@ echo "alex:${ALEX_USER_PASSWORD}" | chpasswd
 unset ALEX_USER_PASSWORD
 log "User 'alex' bereit (sudo)"
 
+# SSH Passwort-Login aktivieren (cloud-init setzt es oft auf 'no')
+cat > /etc/ssh/sshd_config.d/99-vps-stack.conf << 'EOF'
+PasswordAuthentication yes
+PubkeyAuthentication yes
+PermitRootLogin yes
+EOF
+systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+log "SSH: Passwort-Login aktiviert"
+
 # ─────────────────────────────────────────────────────────────
 info "Schritt 3/8 — System + Docker + Auto-Updates installieren..."
 
