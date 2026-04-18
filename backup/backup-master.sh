@@ -55,12 +55,15 @@ mkdir -p "$STAGING"
 mkdir -p "$STAGING/poste-data"
 sudo -n /bin/tar -czpf - -C "$STACK_DIR/poste-data" \
   --exclude="./var/clamav" --exclude="./var/rspamd" \
+  --exclude="./log" \
   . 2>/dev/null | tar -xzf - -C "$STAGING/poste-data" || fail "Fehler bei poste-data"
 
 # Supabase DB Data
 if [ -d "$STACK_DIR/db-data" ]; then
   mkdir -p "$STAGING/db-data"
-  sudo -n /bin/tar -czpf - -C "$STACK_DIR/db-data" . 2>/dev/null | tar -xzf - -C "$STAGING/db-data" || fail "Fehler bei db-data"
+  sudo -n /bin/tar -czpf - -C "$STACK_DIR/db-data" \
+    --exclude="./pg_wal" --exclude="./pg_log" --exclude="./pg_stat_tmp" \
+    . 2>/dev/null | tar -xzf - -C "$STAGING/db-data" || fail "Fehler bei db-data"
 fi
 
 # Flutter Web (www)
