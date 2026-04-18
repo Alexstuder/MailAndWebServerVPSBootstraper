@@ -26,10 +26,10 @@ echo ""
 [ "$EUID" -ne 0 ] && fail "Bitte als root ausführen"
 
 STACK_DIR="/home/alex/vps-stack"
-REPO_URL="https://github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
+REPO_URL="https://github.com/uglyatbeautymolt/MailAndWebServerVPSBootstraper.git"
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 1/7 — Bitwarden Login..."
+info "Schritt 1/8 — Bitwarden Login..."
 echo ""
 
 info "Warten auf Cloud-Init Boot-Prozesse (falls vorhanden)..."
@@ -99,7 +99,7 @@ unset BW_SESSION BW_EMAIL
 log "GPG Passwort + GitHub Token aus Bitwarden geholt — Bitwarden gesperrt"
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 2/7 — User 'alex' anlegen..."
+info "Schritt 2/8 — User 'alex' anlegen..."
 
 if id "alex" &>/dev/null; then
   warn "User 'alex' existiert bereits"
@@ -123,7 +123,7 @@ unset ALEX_PW ALEX_PW2
 log "User 'alex' bereit (sudo)"
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 3/7 — System + Docker + Auto-Updates installieren..."
+info "Schritt 3/8 — System + Docker + Auto-Updates installieren..."
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=600 update -y
@@ -187,7 +187,7 @@ log "unattended-upgrades konfiguriert (täglich 03:00, Reboot 03:30)"
 log "System bereit"
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 4/7 — Repository clonen..."
+info "Schritt 4/8 — Repository clonen..."
 
 if [ -d "$STACK_DIR" ]; then
   warn "$STACK_DIR existiert — wird gesichert"
@@ -262,15 +262,15 @@ fi
 chown -R alex:alex "$STACK_DIR" || true
 
 sudo -u alex git -C "$STACK_DIR" remote set-url origin \
-  "https://${GITHUB_MAIL_TOKEN}@github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
-sudo -u alex git -C "$STACK_DIR" config user.name "Alexstuder"
+  "https://${GITHUB_MAIL_TOKEN}@github.com/uglyatbeautymolt/MailAndWebServerVPSBootstraper.git"
+sudo -u alex git -C "$STACK_DIR" config user.name "alex"
 sudo -u alex git -C "$STACK_DIR" config user.email "alex@alexstuder.ch"
 unset GITHUB_MAIL_TOKEN
 
 log "Repository geclont und konfiguriert"
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 5/7 — Backup von R2 wiederherstellen..."
+info "Schritt 5/8 — Backup von R2 wiederherstellen..."
 
 BACKUP_RESTORED=false
 
@@ -323,7 +323,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 6/7 — DNS Validierung & Stack Start..."
+info "Schritt 6/8 — DNS Validierung & Stack Start..."
 
 source "$STACK_DIR/.env" 2>/dev/null || true
 
@@ -351,9 +351,9 @@ update_cf_dns() {
   response=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${full_name}&type=${type}" \
     -H "Authorization: Bearer $CF_API_TOKEN" \
     -H "Content-Type: application/json")
-  
+
   local record_id=$(echo "$response" | jq -r '.result[0].id // empty')
-  
+
   local data="{\"type\":\"$type\",\"name\":\"$full_name\",\"content\":\"$content\",\"proxied\":$proxied}"
   [ -n "$priority" ] && data="{\"type\":\"$type\",\"name\":\"$full_name\",\"content\":\"$content\",\"proxied\":$proxied,\"priority\":$priority}"
 
@@ -375,31 +375,25 @@ update_cf_dns() {
 }
 
 if command -v dig &>/dev/null; then
-  # 1) Mail A-Record
   MAIL_IP=$(dig +short "mail.$MAIN_DOMAIN" | tail -n1)
   if [ "$MAIL_IP" != "$VPS_IP" ]; then
     warn "🚨 DNS: 'mail.$MAIN_DOMAIN' zeigt nicht auf diesen Server! (Soll: $VPS_IP | Ist: ${MAIL_IP:-Nichts})"
-    info "Versuche via Cloudflare API zu korrigieren..."
     update_cf_dns "A" "mail" "$VPS_IP" false
   else
     log "[OK] DNS: 'mail.$MAIN_DOMAIN' zeigt auf $VPS_IP"
   fi
 
-  # 2) SSH A-Record
   SSH_IP=$(dig +short "ssh.$MAIN_DOMAIN" | tail -n1)
   if [ "$SSH_IP" != "$VPS_IP" ]; then
     warn "🚨 DNS: 'ssh.$MAIN_DOMAIN' zeigt nicht auf Server! (Soll: $VPS_IP | Ist: ${SSH_IP:-Nichts})"
-    info "Versuche via Cloudflare API zu korrigieren..."
     update_cf_dns "A" "ssh" "$VPS_IP" false
   else
     log "[OK] DNS: 'ssh.$MAIN_DOMAIN' zeigt auf $VPS_IP"
   fi
 
-  # 3) MX Record
   MX_RECORD=$(dig +short MX "$MAIN_DOMAIN" | grep "mail.$MAIN_DOMAIN" || true)
   if [ -z "$MX_RECORD" ]; then
     warn "🚨 DNS: MX-Record fehlt oder ist falsch!"
-    info "Versuche via Cloudflare API zu korrigieren..."
     update_cf_dns "MX" "@" "mail.$MAIN_DOMAIN" false 10
   else
     log "[OK] DNS: MX-Record zeigt auf mail.$MAIN_DOMAIN"
@@ -431,7 +425,7 @@ else
   warn "Keine docker-compose.yml vorhanden, überspringe Stack-Start."
 fi
 
-# ── Portainer Admin via API einrichten ─────────────────────────────────
+# ── Portainer Admin via API einrichten ───────────────────────
 if [ -n "$PORTAINER_ADMIN_PASSWORD" ]; then
   info "Portainer Admin-Passwort setzen..."
   PORTAINER_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' portainer 2>/dev/null || echo "")
@@ -455,7 +449,7 @@ if [ -n "$PORTAINER_ADMIN_PASSWORD" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 7/7 — Cron + Firewall..."
+info "Schritt 7/8 — Cron + Firewall..."
 
 (crontab -u alex -l 2>/dev/null; \
   echo "0 2 * * * bash /home/alex/vps-stack/backup/backup-master.sh >> /home/alex/vps-stack/backup/backup.log 2>&1") \
@@ -467,6 +461,48 @@ ufw default allow outgoing
 ufw allow ssh
 ufw --force enable
 log "Firewall (UFW) konfiguriert (nur eingehendes SSH erlaubt)"
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 8/8 — Claude Code installieren..."
+
+# Node.js 20 LTS installieren (falls nicht vorhanden oder zu alt)
+NODE_OK=false
+if command -v node &>/dev/null; then
+  NODE_VER=$(node -e "process.exit(process.version.slice(1).split('.')[0] < 18 ? 1 : 0)" 2>/dev/null && echo ok || echo old)
+  [ "$NODE_VER" = "ok" ] && NODE_OK=true
+fi
+
+if [ "$NODE_OK" = "false" ]; then
+  info "Node.js 20 LTS installieren..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y nodejs
+  log "Node.js $(node -v) installiert"
+else
+  log "Node.js $(node -v) bereits vorhanden — OK"
+fi
+
+# Claude Code global installieren / aktualisieren
+if command -v claude &>/dev/null; then
+  info "Claude Code bereits installiert — aktualisiere..."
+  npm update -g @anthropic-ai/claude-code
+else
+  info "Claude Code installieren..."
+  npm install -g @anthropic-ai/claude-code
+fi
+log "Claude Code $(claude --version 2>/dev/null || echo 'installiert')"
+
+# ANTHROPIC_API_KEY aus .env in User-Umgebung eintragen
+source "$STACK_DIR/.env" 2>/dev/null || true
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+  BASHRC="/home/alex/.bashrc"
+  # Alte Einträge entfernen (Idempotenz)
+  sed -i '/^export ANTHROPIC_API_KEY=/d' "$BASHRC" 2>/dev/null || true
+  echo "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> "$BASHRC"
+  log "ANTHROPIC_API_KEY in ~/.bashrc von user 'alex' gesetzt"
+else
+  warn "ANTHROPIC_API_KEY nicht in .env gefunden"
+  warn "  ➔ Nachholen mit: ./set-secret.sh ANTHROPIC_API_KEY"
+fi
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
@@ -482,6 +518,8 @@ echo "    02:00 — Backup → R2 + Status-Mail"
 echo "    02:30 — Watchtower → Container-Updates"
 echo "    03:00 — unattended-upgrades → System + Docker Engine"
 echo "    03:30 — Automatischer Neustart (falls Kernel-Update)"
+echo ""
+echo "  Claude Code: 'claude' im Terminal (als User alex)"
 echo ""
 echo "  HINWEIS: Bitte per SSH als User 'alex' neu anmelden,"
 echo "           damit die Docker-Rechte (usermod) aktiv werden:"

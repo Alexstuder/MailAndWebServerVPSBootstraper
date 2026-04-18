@@ -59,6 +59,7 @@ else
     CF_R2_ENDPOINT
     PORTAINER_ADMIN_PASSWORD
     BREVO_KEY
+    ANTHROPIC_API_KEY
     BACKUP_MAIL_GPG_PASSWORD
   )
   for i in "${!SECRETS[@]}"; do
@@ -129,6 +130,15 @@ case "$SECRET_NAME" in
     ;;
   POSTGRES_PASSWORD|JWT_SECRET|API_EXTERNAL_URL)
     CONTAINER="supabase-db supabase-auth supabase-rest supabase-studio supabase-meta supabase-realtime supabase-storage"
+    ;;
+  ANTHROPIC_API_KEY)
+    # Kein Container — nur Umgebungsvariable für User alex neu setzen
+    if [ -f /home/alex/.bashrc ]; then
+      sed -i '/^export ANTHROPIC_API_KEY=/d' /home/alex/.bashrc
+      echo "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> /home/alex/.bashrc
+      log "ANTHROPIC_API_KEY in /home/alex/.bashrc aktualisiert — neu anmelden oder: source ~/.bashrc"
+    fi
+    CONTAINER=""
     ;;
   *)
     CONTAINER=""
