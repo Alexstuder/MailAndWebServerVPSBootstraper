@@ -88,15 +88,21 @@ GITHUB_MAIL_TOKEN=$(bw get item "GITHUB_MAIL_TOKEN" \
   --session "$BW_SESSION" | jq -r '.login.password') \
   || fail "Fehler beim Holen von GITHUB_MAIL_TOKEN"
 
+ALEX_USER_PASSWORD=$(bw get item "ALEX_USER_PASSWORD" \
+  --session "$BW_SESSION" | jq -r '.login.password') \
+  || fail "Fehler beim Holen von ALEX_USER_PASSWORD"
+
 [ -z "$BACKUP_MAIL_GPG_PASSWORD" ] || [ "$BACKUP_MAIL_GPG_PASSWORD" = "null" ] \
   && fail "BACKUP_MAIL_GPG_PASSWORD nicht in Bitwarden gefunden"
 [ -z "$GITHUB_MAIL_TOKEN" ] || [ "$GITHUB_MAIL_TOKEN" = "null" ] \
   && fail "GITHUB_MAIL_TOKEN nicht in Bitwarden gefunden"
+[ -z "$ALEX_USER_PASSWORD" ] || [ "$ALEX_USER_PASSWORD" = "null" ] \
+  && fail "ALEX_USER_PASSWORD nicht in Bitwarden gefunden"
 
 bw lock --session "$BW_SESSION" &>/dev/null || true
 unset BW_SESSION BW_EMAIL
 
-log "GPG Passwort + GitHub Token aus Bitwarden geholt — Bitwarden gesperrt"
+log "GPG Passwort + GitHub Token + User-Passwort aus Bitwarden geholt — Bitwarden gesperrt"
 
 # ─────────────────────────────────────────────────────────────
 info "Schritt 2/8 — User 'alex' anlegen..."
@@ -110,16 +116,8 @@ fi
 
 usermod -aG sudo alex
 
-echo ""
-ask "Passwort für User 'alex':"
-while true; do
-  read -s -p "  Passwort: " ALEX_PW; echo ""
-  read -s -p "  Bestätigen: " ALEX_PW2; echo ""
-  [ "$ALEX_PW" = "$ALEX_PW2" ] && break
-  warn "Stimmen nicht überein — nochmals"
-done
-echo "alex:$ALEX_PW" | chpasswd
-unset ALEX_PW ALEX_PW2
+echo "alex:${ALEX_USER_PASSWORD}" | chpasswd
+unset ALEX_USER_PASSWORD
 log "User 'alex' bereit (sudo)"
 
 # ─────────────────────────────────────────────────────────────
