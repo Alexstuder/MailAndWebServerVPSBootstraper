@@ -58,12 +58,18 @@ sudo -n /bin/tar -czpf - -C "$STACK_DIR/poste-data" \
   --exclude="./log" \
   . 2>/dev/null | tar -xzf - -C "$STAGING/poste-data" || fail "Fehler bei poste-data"
 
-# Supabase DB Data
-if [ -d "$STACK_DIR/db-data" ]; then
+# Supabase DB Data — konsistenter Dump via pg_dumpall
+if docker ps --format '{{.Names}}' | grep -q supabase-db; then
+  mkdir -p "$STAGING/db-data"
+  docker exec supabase-db pg_dumpall -U supabase_admin \
+    > "$STAGING/db-data/supabase_dump.sql" 2>/dev/null \
+    || fail "Fehler bei pg_dumpall"
+elif [ -d "$STACK_DIR/db-data" ]; then
+  # Fallback: rohe Dateien wenn Container nicht läuft
   mkdir -p "$STAGING/db-data"
   sudo -n /bin/tar -czpf - -C "$STACK_DIR/db-data" \
     --exclude="./pg_wal" --exclude="./pg_log" --exclude="./pg_stat_tmp" \
-    . 2>/dev/null | tar -xzf - -C "$STAGING/db-data" || fail "Fehler bei db-data"
+    . 2>/dev/null | tar -xzf - -C "$STAGING/db-data" || fail "Fehler bei db-data (raw)"
 fi
 
 # Flutter Web (www)
