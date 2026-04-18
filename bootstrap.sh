@@ -463,6 +463,19 @@ if [ -n "$CF_API_TOKEN" ] && [ -n "$CF_ZONE_ID" ]; then
   else
     log "[OK] DNS: MX → mail.$MAIN_DOMAIN"
   fi
+
+  # Cloudflare: Always Use HTTPS erzwingen
+  CF_HTTPS=$(curl -s "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/settings/always_use_https" \
+    -H "Authorization: Bearer $CF_API_TOKEN" | jq -r '.result.value // empty')
+  if [ "$CF_HTTPS" != "on" ]; then
+    curl -s -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/settings/always_use_https" \
+      -H "Authorization: Bearer $CF_API_TOKEN" \
+      -H "Content-Type: application/json" \
+      --data '{"value":"on"}' >/dev/null
+    log "[✓] Cloudflare: Always Use HTTPS aktiviert"
+  else
+    log "[OK] Cloudflare: Always Use HTTPS bereits aktiv"
+  fi
   echo ""
 elif command -v dig &>/dev/null; then
   # Fallback ohne CF-Credentials: nur SSH und MX via dig
