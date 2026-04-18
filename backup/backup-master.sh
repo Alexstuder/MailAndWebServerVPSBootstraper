@@ -51,9 +51,11 @@ mkdir -p "$STAGING"
 # kopieren wir die reinen Daten via sudo-tar Trick in den Staging-Ordner.
 # Das sudoers-File erlaubt dem User alex exakt diesen Befehl ohne PW.
 
-# Poste.io Data
+# Poste.io Data (ohne var/clamav + var/rspamd — werden vom Image neu geladen)
 mkdir -p "$STAGING/poste-data"
-sudo -n /bin/tar -czpf - -C "$STACK_DIR/poste-data" . 2>/dev/null | tar -xzf - -C "$STAGING/poste-data" || fail "Fehler bei poste-data"
+sudo -n /bin/tar -czpf - -C "$STACK_DIR/poste-data" \
+  --exclude="./var/clamav" --exclude="./var/rspamd" \
+  . 2>/dev/null | tar -xzf - -C "$STAGING/poste-data" || fail "Fehler bei poste-data"
 
 # Supabase DB Data
 if [ -d "$STACK_DIR/db-data" ]; then

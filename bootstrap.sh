@@ -244,8 +244,7 @@ cat > /etc/sudoers.d/alex-vps-stack << SUDOERS
 # sudo Passwort-Timeout: 60 Minuten
 Defaults:alex timestamp_timeout=60
 # Lesezugriff für Backup-Skripte ohne PW-Prompt
-alex ALL=(root) NOPASSWD: /bin/tar -czpf * -C ${STACK_DIR}/poste-data .
-alex ALL=(root) NOPASSWD: /bin/tar -czpf * -C ${STACK_DIR}/db-data .
+alex ALL=(root) NOPASSWD: /bin/tar
 SUDOERS
 chmod 440 /etc/sudoers.d/alex-vps-stack
 log "sudoers konfiguriert (Lesezugriff für Backups)"
