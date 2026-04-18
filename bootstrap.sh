@@ -26,7 +26,7 @@ echo ""
 [ "$EUID" -ne 0 ] && fail "Bitte als root ausführen"
 
 STACK_DIR="/home/alex/vps-stack"
-REPO_URL="https://github.com/uglyatbeautymolt/MailAndWebServerVPSBootstraper.git"
+REPO_URL="https://github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
 
 # ─────────────────────────────────────────────────────────────
 info "Schritt 1/8 — Bitwarden Login..."
@@ -262,7 +262,7 @@ fi
 chown -R alex:alex "$STACK_DIR" || true
 
 sudo -u alex git -C "$STACK_DIR" remote set-url origin \
-  "https://${GITHUB_MAIL_TOKEN}@github.com/uglyatbeautymolt/MailAndWebServerVPSBootstraper.git"
+  "https://${GITHUB_MAIL_TOKEN}@github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
 sudo -u alex git -C "$STACK_DIR" config user.name "alex"
 sudo -u alex git -C "$STACK_DIR" config user.email "alex@alexstuder.ch"
 unset GITHUB_MAIL_TOKEN
