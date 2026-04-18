@@ -1,36 +1,51 @@
-# Projekt: VPS Bootstrapper (Mailserver & Web/Supabase)
-Das Ziel dieses Repositories ist die vollautomatisierte, hoster-unabhängige Bereitstellung eines privaten Stacks auf einem Ubuntu 24.04 Server.
+# VPS Bootstrapper — Mailserver & Web/Supabase (Ubuntu 24.04)
 
-## 1. Zero-Trust & Netzwerk-Architektur
-* **KEINE offenen Ports für Web-Traffic!** Der Server hängt nicht direkt per HTTP/HTTPS im Internet.
-* Der *einzige* Zugang für Web/APIs ist der `cloudflared` (Cloudflare Tunnel).
-* **Ausnahme:** Poste.io (Mailserver). Die Ports 25, 465, 587, 143 und 993 werden direkt durchgereicht, da nativer E-Mail-Verkehr nicht durch kostenlose Cloudflare-Tunnels fließen kann.
-* Alle Container kommunizieren intern über das Docker Bridge-Netzwerk `vps-net`.
+## 1. Netzwerk-Architektur (Zero-Trust)
+* Keine offenen Web-Ports. Einziger Web-Zugang: `cloudflared` (Cloudflare Tunnel).
+* Ausnahme Mailserver: Ports 25, 465, 587, 143, 993 direkt durchgereicht.
+* Alle Container kommunizieren intern über Docker Bridge `vps-net`.
+* Neues Web-Dashboard → Cloudflare Tunnel + nginx-Template, NIE direkten Port öffnen.
 
-## 2. Secrets & Security
-* Es dürfen sich NIEMALS Passwörter oder Klartext-Tokens im Code befinden.
-* Alles wird als Umgebungsvariable aus einer Datei geladen, die im Repository als verschlüsselte Datei `.env.gpg` vorliegt.
-* Die De- und Verschlüsselung geschieht mit einem GPG-Zertifikat.
-* Das Master-GPG-Passwort liegt beim User verschlüsselt in Bitwarden. Das `bootstrap.sh` holt es sich via Bitwarden-CLI beim ersten Server-Start.
+## 2. Multi-VPS & Cloudflare Tunnel
+* Jeder VPS/Domain braucht einen **eigenen** Tunnel (Zero Trust Dashboard → Networks → Tunnels).
+* `CLOUDFLARE_TUNNEL_TOKEN` ist tunnel-spezifisch — niemals zwischen VPS teilen.
+* Alle Subdomains laufen durch nginx als Reverse Proxy. Neuer Service = Eintrag im CF-Tunnel + nginx-Template.
+* `CF_ZONE_ID` ist domain-spezifisch (eine Zone pro Domain in Cloudflare).
 
-## 3. Storage & Backups (State)
-* Das Repository ist "Stateless" (enthält nur Konfiguration und Code). 
-* Wirkliche Anwendungs-Daten ("State") sind strikt getrennt und werden in Docker-Volumes gespeichert (z.B. `poste-data`, `db-data`).
-* Backups laufen automatisiert täglich um 02:00 Uhr. Ein Cronjob packt die Volumes in Tar-Archive, verschlüsselt diese mit GPG und lädt sie via Rclone auf Cloudflare R2 hoch.
+## 3. Domain-Variablen
+* `MAIL_DOMAIN` = Root-Mail-Domain (z.B. `alexstuder.cloud`) — für SMTP-Hostname & MX-Record.
+* nginx-Template nutzt `mail.${MAIL_DOMAIN}` für das Webmail-Interface (nicht `${MAIL_DOMAIN}` direkt).
+* Alle Domains sind variabel über `.env` — nie hartverdrahtet.
+* **Testdomain:** `alexstuder.cloud` → **Produktionsdomain:** `alexstuder.ch` (Migration noch ausstehend).
 
-## 4. Technologie-Stack-Regeln
-* **Web-App:** Die Flutter-Web-Applikation wird als reines statisches HTML/JS-Bundle über einen leichtgewichtigen NGINX (`nginx:alpine`) ausgespielt. Es dürfen keine Node.js Server für die Website eingeführt werden.
-* **Backend:** Genutzt wird der offizielle Supabase-Stack.
-* **Mail:** Supabase wird so konfiguriert, dass Auth-Mails komplett lokal über den internen Poste.io-Container via Port 25 ausgeliefert werden.
+## 4. Secrets & Security
+* Keine Klartextgeheimnisse im Code. Alles in `.env`, verschlüsselt als `.env.gpg` (GPG symmetrisch AES256).
+* GPG-Passphrase (`BACKUP_MAIL_GPG_PASSWORD`) liegt in Bitwarden; `bootstrap.sh` holt sie via Bitwarden-CLI.
+* GitHub-Push erfordert Token (`GITHUB_MAIL_TOKEN`) aus Bitwarden — immer beim User anfragen.
 
-## 5. Domain-Lebenszyklus & Migration
-* **Testphase:** Das gesamte Setup wird initial *ausschließlich* auf der Testdomain **`alexstuder.cloud`** aufgebaut, konfiguriert und auf Herz und Nieren geprüft.
-* **Produktionsphase:** Erst wenn das System lupenrein und fehlerfrei läuft, erfolgt der Wechsel auf die finale Produktionsdomain **`alexstuder.ch`**.
-* **Design-Konsequenz:** Bei JEDER Lösungsfindung, Architektur-Entscheidung und jedem Skript muss zwingend berücksichtigt werden, dass die Domain in Zukunft gewechselt wird. Domains (z.B. `MAIL_DOMAIN`, `API_DOMAIN`, `WEB_DOMAIN`) müssen voll variabel gestaltet sein (z.B. primär über `.env` Variablen) und werden vom zentralen NGINX Reverse-Proxy über `envsubst` Templates dynamisch geroutet. Keine Domain wird jemals hartverdrahtet.
+## 5. Storage, State & Backups
+* Repo ist stateless (nur Config/Code). State in Docker Volumes (`poste-data`, `db-data`, etc.).
+* Neuer Service mit State → Backup-Script prüfen (`backup/backup-master.sh` → Cloudflare R2, täglich 02:00).
 
-## Anweisung an KIs (Claude/Cursor/Copilot/Antigravity)
-1. Bevorhalte stets das Prinzip der **Idempotenz**. Wenn das `bootstrap.sh` mehrmals ausgeführt wird, darf das System nicht kaputt gehen.
-2. Schlage niemals Änderungen vor, die externe Web-Ports auf dem VPS öffnen. Neue Web-Dashboards müssen dem Cloudflare Tunnel hinzugefügt werden.
-3. Füllst du die `docker-compose.yml` mit einem neuen Service, der dauerhafte Daten (State) generiert, MUSST du im gleichen Atemzug prüfen, ob dieser State in das Backup-Script nach Cloudflare R2 integriert werden muss.
-4. **Qualitätssicherung (QS) & Recherche:** Bevor du dem User eine Lösung vorschlägst, MUSS im Internet nach der aktuellsten und stabilsten Best Practice gesucht werden. Der eigene, erste Lösungsansatz muss hart hinterfragt und validiert werden. Erst wenn zweifelsfrei bestätigt ist, dass die vorliegende Lösung robust und state-of-the-art ist, darf sie präsentiert werden.
-5. **Git-Workflow:** Führe NIEMALS eigenmächtig einen Push in das GitHub-Repository durch. Nachdem Änderungen am Code vorgenommen wurden, musst du stets den User um die explizite Erlaubnis für einen Push bitten.
+## 6. Supabase DB-Initialisierung (kritisch)
+* `volumes/db/init/00-data.sql` — erstellt ALLE Rollen, Schemas und Grants.
+* `volumes/db/init/01-passwords.sh` — setzt Passwörter für alle Service-Accounts.
+* Das `supabase/postgres`-Image erstellt nur `supabase_admin`. Alle anderen Rollen (auth, storage, realtime, etc.) kommen ausschliesslich aus diesen Init-Skripten.
+* `db-data/` löschen = kompletter Datenverlust + Init-Skripte laufen beim nächsten Start neu durch.
+* Bei Supabase-Problemen zuerst `volumes/db/init/` prüfen.
+
+## 7. Technologie-Stack
+* **Web:** Flutter-Web als statisches Bundle via `nginx:alpine` (`www/index.html` als Platzhalter). Kein Node.js.
+* **Backend:** Offizieller Supabase-Stack (Kong, Auth, REST, Studio, Realtime, Storage, Meta).
+* **Kong:** Env-Substitution via `supabase_config/kong-entrypoint.sh` mit `sed` (`envsubst` nicht im Kong-Image).
+* **nginx:** Env-Substitution via `envsubst`-Templates in `nginx/templates/`.
+* **poste.io:** Config-Overrides in `poste-config/` (z.B. `worker-controller.inc` für rspamd Unix-Socket).
+* **Mail:** Supabase Auth sendet Mails lokal über poste.io (intern Port 25).
+
+## Anweisungen an KIs
+1. **Idempotenz:** `bootstrap.sh` muss mehrfach ausführbar sein ohne Schaden.
+2. **Keine Web-Ports öffnen.** Neues Dashboard → Cloudflare Tunnel + nginx.
+3. **State + Backup:** Neuer Service mit persistenten Daten → Backup-Script anpassen.
+4. **Vor Push:** Explizit beim User nach GitHub-Token (`GITHUB_MAIL_TOKEN`) fragen.
+5. **Supabase-DB-Probleme:** Immer zuerst `volumes/db/init/` und DB-Logs prüfen.
+6. **QS:** Lösungen vor Präsentation auf aktuelle Best Practices validieren.
