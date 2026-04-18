@@ -560,7 +560,7 @@ if [ -n "$CF_API_TOKEN" ] && [ -n "$MAIL_DOMAIN" ]; then
   fi
 
   # Cron: Renewal alle 30 Tage (root)
-  RENEW_CRON="0 3 1 * * certbot renew --quiet 2>&1 | logger -t certbot-renew"
+  RENEW_CRON="0 3 1 * * certbot renew --force-renewal --quiet 2>&1 | logger -t certbot-renew"
   ( crontab -l 2>/dev/null | grep -v 'certbot renew'; echo "$RENEW_CRON" ) | crontab -
   log "LetsEncrypt-Renewal-Cron eingerichtet (monatlich 03:00)"
 else
