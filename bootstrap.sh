@@ -262,9 +262,20 @@ fi
 chown -R alex:alex "$STACK_DIR" || true
 
 sudo -u alex git -C "$STACK_DIR" remote set-url origin \
-  "https://${GITHUB_MAIL_TOKEN}@github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
+  "https://github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
 sudo -u alex git -C "$STACK_DIR" config user.name "alex"
 sudo -u alex git -C "$STACK_DIR" config user.email "alex@alexstuder.ch"
+
+# GitHub Token in ~/.netrc hinterlegen → git push ohne manuelle Token-Eingabe
+NETRC_FILE="/home/alex/.netrc"
+# Bestehenden github.com-Eintrag entfernen (Idempotenz)
+grep -v "machine github.com" "$NETRC_FILE" 2>/dev/null > "${NETRC_FILE}.tmp" || true
+echo "machine github.com login Alexstuder password ${GITHUB_MAIL_TOKEN}" >> "${NETRC_FILE}.tmp"
+mv "${NETRC_FILE}.tmp" "$NETRC_FILE"
+chown alex:alex "$NETRC_FILE"
+chmod 600 "$NETRC_FILE"
+log "GitHub Token in ~/.netrc hinterlegt"
+
 unset GITHUB_MAIL_TOKEN
 
 log "Repository geclont und konfiguriert"
