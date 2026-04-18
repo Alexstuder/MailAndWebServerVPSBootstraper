@@ -499,6 +499,18 @@ if [ -n "$ANTHROPIC_API_KEY" ]; then
   sed -i '/^export ANTHROPIC_API_KEY=/d' "$BASHRC" 2>/dev/null || true
   echo "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> "$BASHRC"
   log "ANTHROPIC_API_KEY in ~/.bashrc von user 'alex' gesetzt"
+
+  # ANTHROPIC_API_KEY in Claude Code Config hinterlegen
+  CLAUDE_CONFIG="/home/alex/.claude.json"
+  if [ -f "$CLAUDE_CONFIG" ]; then
+    tmp=$(mktemp)
+    jq --arg key "$ANTHROPIC_API_KEY" '.apiKey = $key' "$CLAUDE_CONFIG" > "$tmp" && mv "$tmp" "$CLAUDE_CONFIG"
+  else
+    echo "{"apiKey":"${ANTHROPIC_API_KEY}"}" > "$CLAUDE_CONFIG"
+  fi
+  chown alex:alex "$CLAUDE_CONFIG"
+  chmod 600 "$CLAUDE_CONFIG"
+  log "ANTHROPIC_API_KEY in ~/.claude.json von user 'alex' gesetzt"
 else
   warn "ANTHROPIC_API_KEY nicht in .env gefunden"
   warn "  ➔ Nachholen mit: ./set-secret.sh ANTHROPIC_API_KEY"
