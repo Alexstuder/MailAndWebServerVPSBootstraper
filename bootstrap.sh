@@ -365,57 +365,105 @@ update_cf_dns() {
   local full_name="${name}.$MAIN_DOMAIN"
   [ "$name" = "@" ] && full_name="$MAIN_DOMAIN"
 
-  local response
-  response=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${full_name}&type=${type}" \
-    -H "Authorization: Bearer $CF_API_TOKEN" \
-    -H "Content-Type: application/json")
-
-  local record_id=$(echo "$response" | jq -r '.result[0].id // empty')
-
   local data="{\"type\":\"$type\",\"name\":\"$full_name\",\"content\":\"$content\",\"proxied\":$proxied}"
   [ -n "$priority" ] && data="{\"type\":\"$type\",\"name\":\"$full_name\",\"content\":\"$content\",\"proxied\":$proxied,\"priority\":$priority}"
 
-  if [ -n "$record_id" ]; then
+  # Suche ohne Typ-Filter: findet auch CNAMEs die in A-Records umgewandelt werden müssen
+  local response
+  response=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${full_name}" \
+    -H "Authorization: Bearer $CF_API_TOKEN" \
+    -H "Content-Type: application/json")
+
+  local record_id existing_type
+  record_id=$(echo "$response" | jq -r '.result[0].id // empty')
+  existing_type=$(echo "$response" | jq -r '.result[0].type // empty')
+
+  local result
+  if [ -n "$record_id" ] && [ "$existing_type" = "$type" ]; then
     info "Aktualisiere $type-Record für $full_name auf $content (Proxied: $proxied)..."
-    curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/$record_id" \
+    result=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/$record_id" \
       -H "Authorization: Bearer $CF_API_TOKEN" \
       -H "Content-Type: application/json" \
-      --data "$data" >/dev/null
-    log "Cloudflare $type-Record (ID: $record_id) erfolgreich aktualisiert!"
+      --data "$data")
+    if echo "$result" | jq -e '.success' >/dev/null 2>&1; then
+      log "Cloudflare $type-Record (ID: $record_id) erfolgreich aktualisiert!"
+    else
+      warn "CF API Fehler beim Aktualisieren von $full_name: $(echo "$result" | jq -r '.errors[0].message // "unbekannt"')"
+    fi
+  elif [ -n "$record_id" ] && [ "$existing_type" != "$type" ]; then
+    # Falscher Typ (z.B. CNAME statt A) → erst löschen, dann neu erstellen
+    info "Lösche $existing_type-Record für $full_name (wird durch $type ersetzt)..."
+    curl -s -X DELETE "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/$record_id" \
+      -H "Authorization: Bearer $CF_API_TOKEN" >/dev/null
+    info "Erstelle $type-Record für $full_name auf $content (Proxied: $proxied)..."
+    result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+      -H "Authorization: Bearer $CF_API_TOKEN" \
+      -H "Content-Type: application/json" \
+      --data "$data")
+    if echo "$result" | jq -e '.success' >/dev/null 2>&1; then
+      log "Cloudflare $type-Record erfolgreich erstellt (ersetzt $existing_type)!"
+    else
+      warn "CF API Fehler beim Erstellen von $full_name: $(echo "$result" | jq -r '.errors[0].message // "unbekannt"')"
+    fi
   else
     info "Erstelle neuen $type-Record für $full_name auf $content (Proxied: $proxied)..."
-    curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+    result=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
       -H "Authorization: Bearer $CF_API_TOKEN" \
       -H "Content-Type: application/json" \
-      --data "$data" >/dev/null
-    log "Cloudflare $type-Record erfolgreich erstellt!"
+      --data "$data")
+    if echo "$result" | jq -e '.success' >/dev/null 2>&1; then
+      log "Cloudflare $type-Record erfolgreich erstellt!"
+    else
+      warn "CF API Fehler beim Erstellen von $full_name: $(echo "$result" | jq -r '.errors[0].message // "unbekannt"')"
+    fi
   fi
 }
 
-if command -v dig &>/dev/null; then
-  MAIL_IP=$(dig +short "mail.$MAIN_DOMAIN" | tail -n1)
-  if [ "$MAIL_IP" != "$VPS_IP" ]; then
-    warn "🚨 DNS: 'mail.$MAIN_DOMAIN' zeigt nicht auf diesen Server! (Soll: $VPS_IP | Ist: ${MAIL_IP:-Nichts})"
+if [ -n "$CF_API_TOKEN" ] && [ -n "$CF_ZONE_ID" ]; then
+  # mail.DOMAIN — muss unproxied A-Record sein (SMTP/IMAP direkt)
+  MAIL_CF=$(curl -s "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=mail.${MAIN_DOMAIN}&type=A" \
+    -H "Authorization: Bearer $CF_API_TOKEN" | jq -r '.result[0].content // empty')
+  if [ "$MAIL_CF" != "$VPS_IP" ]; then
+    warn "🚨 DNS: 'mail.$MAIN_DOMAIN' zeigt nicht auf $VPS_IP (CF: ${MAIL_CF:-fehlt})"
     update_cf_dns "A" "mail" "$VPS_IP" false
   else
-    log "[OK] DNS: 'mail.$MAIN_DOMAIN' zeigt auf $VPS_IP"
+    log "[OK] DNS: 'mail.$MAIN_DOMAIN' → $VPS_IP (unproxied)"
   fi
 
-  SSH_IP=$(dig +short "ssh.$MAIN_DOMAIN" | tail -n1)
-  if [ "$SSH_IP" != "$VPS_IP" ]; then
-    warn "🚨 DNS: 'ssh.$MAIN_DOMAIN' zeigt nicht auf Server! (Soll: $VPS_IP | Ist: ${SSH_IP:-Nichts})"
+  # webmail.DOMAIN — wird automatisch vom CF Tunnel (Zero Trust Dashboard) als CNAME angelegt
+  WEBMAIL_CF=$(curl -s "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=webmail.${MAIN_DOMAIN}&type=CNAME" \
+    -H "Authorization: Bearer $CF_API_TOKEN" | jq -r '.result[0].content // empty')
+  if [ -z "$WEBMAIL_CF" ]; then
+    warn "🚨 DNS: 'webmail.$MAIN_DOMAIN' fehlt!"
+    warn "   → Im CF Zero-Trust-Dashboard: Tunnel → Public Hostnames → 'webmail.$MAIN_DOMAIN' → http://nginx:80"
+  else
+    log "[OK] DNS: 'webmail.$MAIN_DOMAIN' → CNAME (Tunnel)"
+  fi
+
+  # ssh.DOMAIN
+  SSH_CF=$(curl -s "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=ssh.${MAIN_DOMAIN}&type=A" \
+    -H "Authorization: Bearer $CF_API_TOKEN" | jq -r '.result[0].content // empty')
+  if [ "$SSH_CF" != "$VPS_IP" ]; then
+    warn "🚨 DNS: 'ssh.$MAIN_DOMAIN' zeigt nicht auf $VPS_IP"
     update_cf_dns "A" "ssh" "$VPS_IP" false
   else
-    log "[OK] DNS: 'ssh.$MAIN_DOMAIN' zeigt auf $VPS_IP"
+    log "[OK] DNS: 'ssh.$MAIN_DOMAIN' → $VPS_IP"
   fi
 
-  MX_RECORD=$(dig +short MX "$MAIN_DOMAIN" | grep "mail.$MAIN_DOMAIN" || true)
-  if [ -z "$MX_RECORD" ]; then
-    warn "🚨 DNS: MX-Record fehlt oder ist falsch!"
+  # MX-Record
+  MX_CF=$(curl -s "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${MAIN_DOMAIN}&type=MX" \
+    -H "Authorization: Bearer $CF_API_TOKEN" | jq -r '.result[0].content // empty')
+  if [ "$MX_CF" != "mail.$MAIN_DOMAIN" ]; then
+    warn "🚨 DNS: MX-Record fehlt oder falsch (ist: ${MX_CF:-leer})"
     update_cf_dns "MX" "@" "mail.$MAIN_DOMAIN" false 10
   else
-    log "[OK] DNS: MX-Record zeigt auf mail.$MAIN_DOMAIN"
+    log "[OK] DNS: MX → mail.$MAIN_DOMAIN"
   fi
+  echo ""
+elif command -v dig &>/dev/null; then
+  # Fallback ohne CF-Credentials: nur SSH und MX via dig
+  SSH_IP=$(dig +short "ssh.$MAIN_DOMAIN" | tail -n1)
+  [ "$SSH_IP" != "$VPS_IP" ] && warn "🚨 DNS: ssh.$MAIN_DOMAIN zeigt nicht auf $VPS_IP" || log "[OK] ssh.$MAIN_DOMAIN"
   echo ""
 fi
 
