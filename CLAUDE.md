@@ -46,6 +46,6 @@
 1. **Idempotenz:** `bootstrap.sh` muss mehrfach ausführbar sein ohne Schaden.
 2. **Keine Web-Ports öffnen.** Neues Dashboard → Cloudflare Tunnel + nginx.
 3. **State + Backup:** Neuer Service mit persistenten Daten → Backup-Script anpassen.
-4. **Vor Push:** Explizit beim User nach GitHub-Token (`GITHUB_MAIL_TOKEN`) fragen.
+4. **Vor Push:** GitHub-Token liegt in `~/.netrc` (machine github.com) — kein manuelles Nachfragen nötig, direkt `git push` ausführen.
 5. **Supabase-DB-Probleme:** Immer zuerst `volumes/db/init/` und DB-Logs prüfen.
 6. **QS:** Lösungen vor Präsentation auf aktuelle Best Practices validieren.
