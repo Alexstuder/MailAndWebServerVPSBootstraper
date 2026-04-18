@@ -62,10 +62,11 @@ services:
       - vps-net
 
   watchtower:
-    image: containrrr/watchtower:latest
+    image: containrrr/watchtower:1.7.1
     container_name: watchtower
     restart: unless-stopped
     environment:
+      - DOCKER_API_VERSION=1.45
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_INCLUDE_RESTARTING=true
       - WATCHTOWER_POLL_INTERVAL=86400
@@ -81,15 +82,18 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: 3600
     volumes:
       - ./db-data:/var/lib/postgresql/data
       - ./volumes/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
+      test: ["CMD", "pg_isready", "-U", "supabase_admin", "-d", "postgres"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     networks:
       - vps-net
 
@@ -97,11 +101,19 @@ services:
     image: kong:2.8.1
     container_name: supabase-kong
     restart: unless-stopped
+    entrypoint: /home/kong/kong-entrypoint.sh
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      LUA_AUTH_EXPR: "$$(headers.authorization)"
+      LUA_RT_WS_EXPR: "$$(query_params.apikey)"
     volumes:
-      - ./supabase_config/kong.yml:/var/lib/kong/kong.yml:ro
+      - ./supabase_config/kong.yml:/home/kong/temp.yml:ro
+      - ./supabase_config/kong-entrypoint.sh:/home/kong/kong-entrypoint.sh:ro
     networks:
       - vps-net
 
@@ -142,10 +154,14 @@ services:
     container_name: supabase-studio
     restart: unless-stopped
     environment:
+      HOSTNAME: "0.0.0.0"
       STUDIO_PG_META_URL: http://supabase-meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      SUPABASE_URL: ${API_EXTERNAL_URL}
+      SUPABASE_URL: http://supabase-kong:8000
       SUPABASE_PUBLIC_URL: ${API_EXTERNAL_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
       STUDIO_DEFAULT_ORGANIZATION: "Default"
       STUDIO_DEFAULT_PROJECT: "Default"
     networks:
