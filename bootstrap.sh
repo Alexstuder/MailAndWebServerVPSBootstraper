@@ -318,10 +318,15 @@ if [ -f "$STACK_DIR/rclone/rclone.conf" ]; then
       log "Poste.io Backup wiederhergestellt"
     fi
 
-    if [ -d "$STAGING/db-data/" ]; then
+    if [ -f "$STAGING/db-data/supabase_dump.sql" ]; then
+      mkdir -p "$STACK_DIR/restore"
+      cp "$STAGING/db-data/supabase_dump.sql" "$STACK_DIR/restore/supabase_dump.sql"
+      log "Supabase SQL-Dump bereitgestellt — wird nach Stack-Start eingespielt"
+    elif [ -d "$STAGING/db-data/" ]; then
+      # Fallback: altes raw-backup Format
       mkdir -p "$STACK_DIR/db-data"
       cp -rp "$STAGING/db-data/." "$STACK_DIR/db-data/"
-      log "Supabase (PostgreSQL) Backup wiederhergestellt"
+      log "Supabase (PostgreSQL) raw-Backup wiederhergestellt"
     fi
 
     if [ -d "$STAGING/www/" ]; then
@@ -485,6 +490,23 @@ if [ -f "docker-compose.yml" ]; then
     sleep 10
     docker compose ps
     log "Docker Stack erfolgreich gestartet"
+
+    # Supabase SQL-Dump einspielen falls vorhanden (aus Backup-Restore)
+    if [ -f "$STACK_DIR/restore/supabase_dump.sql" ]; then
+      info "Supabase DB-Dump wird eingespielt..."
+      for i in $(seq 1 12); do
+        if docker exec supabase-db pg_isready -U supabase_admin >/dev/null 2>&1; then
+          break
+        fi
+        sleep 5
+      done
+      docker exec -i supabase-db psql -U supabase_admin -d postgres \
+        < "$STACK_DIR/restore/supabase_dump.sql" >/dev/null 2>&1 \
+        && log "Supabase DB-Dump erfolgreich eingespielt" \
+        || fail "Fehler beim Einspielen des Supabase DB-Dumps"
+      rm -f "$STACK_DIR/restore/supabase_dump.sql"
+      rmdir "$STACK_DIR/restore" 2>/dev/null || true
+    fi
   fi
 else
   warn "Keine docker-compose.yml vorhanden, überspringe Stack-Start."
