@@ -8,7 +8,8 @@
 poste-data/
 db-data/
 portainer-data/
-www/
+www/*
+!www/index.html
 
 # OS/System
 .DS_Store

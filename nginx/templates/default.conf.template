@@ -73,7 +73,7 @@ server {
 # -------------------------------------------------------------
 server {
     listen       80;
-    server_name  ${MAIL_DOMAIN};
+    server_name  mail.${MAIL_DOMAIN};
 
     # Grosse Anhänge zulassen
     client_max_body_size 50M;
