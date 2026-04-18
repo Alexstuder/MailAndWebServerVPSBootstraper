@@ -136,7 +136,7 @@ case "$SECRET_NAME" in
     # Kein Container — nur Umgebungsvariable für User alex neu setzen
     if [ -f /home/alex/.bashrc ]; then
       sed -i '/^export ANTHROPIC_API_KEY=/d' /home/alex/.bashrc
-      echo "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> /home/alex/.bashrc
+      echo "export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY}\"" >> /home/alex/.bashrc
       log "ANTHROPIC_API_KEY in /home/alex/.bashrc aktualisiert — neu anmelden oder: source ~/.bashrc"
     fi
     CONTAINER=""

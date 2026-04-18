@@ -3,6 +3,7 @@
 .env.backup
 *.pem
 *.key
+rclone/rclone.conf
 
 # Data Volumes (State)
 poste-data/

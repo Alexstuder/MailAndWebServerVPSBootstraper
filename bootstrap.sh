@@ -567,7 +567,7 @@ if [ -n "$ANTHROPIC_API_KEY" ]; then
   BASHRC="/home/alex/.bashrc"
   # Alte Einträge entfernen (Idempotenz)
   sed -i '/^export ANTHROPIC_API_KEY=/d' "$BASHRC" 2>/dev/null || true
-  echo "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> "$BASHRC"
+  echo "export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY}\"" >> "$BASHRC"
   log "ANTHROPIC_API_KEY in ~/.bashrc von user 'alex' gesetzt"
 
   # ANTHROPIC_API_KEY in Claude Code Config hinterlegen
@@ -576,7 +576,7 @@ if [ -n "$ANTHROPIC_API_KEY" ]; then
     tmp=$(mktemp)
     jq --arg key "$ANTHROPIC_API_KEY" '.apiKey = $key' "$CLAUDE_CONFIG" > "$tmp" && mv "$tmp" "$CLAUDE_CONFIG"
   else
-    echo "{"apiKey":"${ANTHROPIC_API_KEY}"}" > "$CLAUDE_CONFIG"
+    echo "{\"apiKey\":\"${ANTHROPIC_API_KEY}\"}" > "$CLAUDE_CONFIG"
   fi
   chown alex:alex "$CLAUDE_CONFIG"
   chmod 600 "$CLAUDE_CONFIG"
