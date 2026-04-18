@@ -1,0 +1,201 @@
+version: '3.8'
+
+networks:
+  vps-net:
+    driver: bridge
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - vps-net
+
+  posteio:
+    image: analogic/poste.io:latest
+    container_name: posteio
+    restart: unless-stopped
+    hostname: ${MAIL_DOMAIN:-mail.alexstuder.cloud}
+    ports:
+      - "25:25"
+      - "465:465"
+      - "587:587"
+      - "143:143"
+      - "993:993"
+    environment:
+      - TZ=Europe/Zurich
+      - HTTPS=OFF
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./poste-data:/data
+    networks:
+      - vps-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
+    environment:
+      MAIL_DOMAIN: ${MAIL_DOMAIN:-mail.alexstuder.cloud}
+      API_DOMAIN: ${API_DOMAIN:-api.alexstuder.cloud}
+      WEB_DOMAIN: ${WEB_DOMAIN:-www.alexstuder.cloud}
+      DB_DOMAIN: ${DB_DOMAIN:-db.alexstuder.cloud}
+      PORTAINER_DOMAIN: ${PORTAINER_DOMAIN:-portainer.alexstuder.cloud}
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./www:/usr/share/nginx/html:ro
+    networks:
+      - vps-net
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./portainer-data:/data
+    networks:
+      - vps-net
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      - WATCHTOWER_POLL_INTERVAL=86400
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: posteio nginx portainer
+    networks:
+      - vps-net
+
+  supabase-db:
+    image: supabase/postgres:17.6.1.043
+    container_name: supabase-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - ./db-data:/var/lib/postgresql/data
+      - ./volumes/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vps-net
+
+  supabase-kong:
+    image: kong:2.8.1
+    container_name: supabase-kong
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+    volumes:
+      - ./supabase_config/kong.yml:/var/lib/kong/kong.yml:ro
+    networks:
+      - vps-net
+
+  supabase-auth:
+    image: supabase/gotrue:v2.186.0
+    container_name: supabase-auth
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_DB_DRIVER: postgres
+      DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@supabase-db:5432/postgres?sslmode=disable
+      GOTRUE_SMTP_HOST: posteio
+      GOTRUE_SMTP_PORT: 25
+      GOTRUE_SITE_URL: ${SITE_URL}
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+    networks:
+      - vps-net
+
+  supabase-rest:
+    image: postgrest/postgrest:v13.0.7
+    container_name: supabase-rest
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_SCHEMAS: public,storage,auth
+    networks:
+      - vps-net
+
+  supabase-studio:
+    image: supabase/studio:2026.04.08-sha-205cbe7
+    container_name: supabase-studio
+    restart: unless-stopped
+    environment:
+      STUDIO_PG_META_URL: http://supabase-meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SUPABASE_URL: ${API_EXTERNAL_URL}
+      SUPABASE_PUBLIC_URL: ${API_EXTERNAL_URL}
+      STUDIO_DEFAULT_ORGANIZATION: "Default"
+      STUDIO_DEFAULT_PROJECT: "Default"
+    networks:
+      - vps-net
+
+  supabase-meta:
+    image: supabase/postgres-meta:v0.96.3
+    container_name: supabase-meta
+    restart: unless-stopped
+    environment:
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - vps-net
+
+  supabase-realtime:
+    image: supabase/realtime:v2.76.5
+    container_name: supabase-realtime
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: supabase-db
+      DB_USER: supabase_replication_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_SSL: "false"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      JWT_SECRET: ${JWT_SECRET}
+      REPLYTO_EMAIL: ${MAIL_DOMAIN}
+      PORT: 5000
+      APP_NAME: realtime
+    networks:
+      - vps-net
+
+  supabase-storage:
+    image: supabase/storage-api:v1.48.26
+    container_name: supabase-storage
+    restart: unless-stopped
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      GLOBAL_S3_BUCKET: stub
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - ./supabase_storage:/var/lib/storage
+    networks:
+      - vps-net

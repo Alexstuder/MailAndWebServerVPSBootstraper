@@ -1,0 +1,108 @@
+# -------------------------------------------------------------
+# Default / Catch-All (Blockiert alle nicht-definierten Subdomains!)
+# -------------------------------------------------------------
+server {
+    # 'default_server' fängt alles ab, was durch kein 'server_name' matcht.
+    listen       80 default_server;
+    
+    # Catch-all für jeden Host-Namen ('_').
+    server_name  _;
+
+    # 444 ist ein spezieller NGINX_Code, der die IP-Verbindung sofort trennt, 
+    # ohne dass der Server überhaupt mit einem HTTP-Header (wie 404) antwortet.
+    return 444;
+}
+
+# -------------------------------------------------------------
+# Web App (Flutter Front-End)
+# -------------------------------------------------------------
+server {
+    listen       80;
+    server_name  ${WEB_DOMAIN} localhost;
+
+    # Erhöhtes Timeout für Flutter Assets falls nötig
+    keepalive_timeout 65;
+
+    location / {
+        root   /usr/share/nginx/html;
+        index  index.html index.htm;
+        # Standard für Single Page Applications (SPA / Flutter Web)
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+# -------------------------------------------------------------
+# Supabase API Gateway (Kong)
+# -------------------------------------------------------------
+server {
+    listen       80;
+    server_name  ${API_DOMAIN};
+
+    # Websocket / GraphQL Support für Kong
+    location / {
+        proxy_pass http://supabase-kong:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Websockets (Realtime)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# -------------------------------------------------------------
+# Supabase Studio (DB UI)
+# -------------------------------------------------------------
+server {
+    listen       80;
+    server_name  ${DB_DOMAIN};
+
+    location / {
+        proxy_pass http://supabase-studio:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# -------------------------------------------------------------
+# Poste.io (Webmail & Admin UI)
+# -------------------------------------------------------------
+server {
+    listen       80;
+    server_name  ${MAIL_DOMAIN};
+
+    # Grosse Anhänge zulassen
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass http://posteio:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# -------------------------------------------------------------
+# Portainer
+# -------------------------------------------------------------
+server {
+    listen       80;
+    server_name  ${PORTAINER_DOMAIN};
+
+    location / {
+        proxy_pass http://portainer:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Websockets für Terminal-Sessions
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}

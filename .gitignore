@@ -1,0 +1,15 @@
+# Secrets
+.env
+.env.backup
+*.pem
+*.key
+
+# Data Volumes (State)
+poste-data/
+db-data/
+portainer-data/
+www/
+
+# OS/System
+.DS_Store
+Thumbs.db

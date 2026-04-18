@@ -1,0 +1,489 @@
+#!/bin/bash
+set -e
+
+# ─────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+log()  { echo -e "${GREEN}[✓]${NC} $1"; }
+info() { echo -e "${BLUE}[→]${NC} $1"; }
+warn() { echo -e "${YELLOW}[!]${NC} $1"; }
+fail() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+ask()  { echo -e "${YELLOW}[?]${NC} $1"; }
+
+BOOTSTRAP_VERSION="V.2026.1"
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║ VPS Stack — Bootstrap                    ║"
+echo "║ Poste.io / Supabase / Flutter Web        ║"
+echo "║ ${BOOTSTRAP_VERSION}                              ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
+[ "$EUID" -ne 0 ] && fail "Bitte als root ausführen"
+
+STACK_DIR="/home/alex/vps-stack"
+REPO_URL="https://github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 1/7 — Bitwarden Login..."
+echo ""
+
+info "Warten auf Cloud-Init Boot-Prozesse (falls vorhanden)..."
+if command -v cloud-init &>/dev/null; then
+  cloud-init status --wait >/dev/null 2>&1 || true
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+info "Lade Updates... (Wartet automatisch, falls Ubuntu im Hintergrund noch Updates fährt)"
+apt-get -o DPkg::Lock::Timeout=600 update -y
+apt-get -o DPkg::Lock::Timeout=600 install -y curl unzip jq gpg git
+
+if ! command -v bw &>/dev/null; then
+  info "Bitwarden CLI installieren..."
+  curl -fsSL "https://vault.bitwarden.com/download/?app=cli&platform=linux" \
+    -o /tmp/bw.zip
+  unzip -q /tmp/bw.zip -d /tmp/bw
+  mv /tmp/bw/bw /usr/local/bin/bw
+  chmod +x /usr/local/bin/bw
+  rm -rf /tmp/bw /tmp/bw.zip
+  log "Bitwarden CLI installiert"
+fi
+
+ask "Bitwarden E-Mail:"
+read -p "  > " BW_EMAIL
+
+ask "Bitwarden Master-Passwort:"
+read -s -p "  > " BW_PASSWORD; echo ""
+
+export BW_PASSWORD
+
+ask "Welche Haupt-Domain soll verwendet werden? [Standard: alexstuder.cloud]"
+read -p "  > " MAIN_DOMAIN
+MAIN_DOMAIN=${MAIN_DOMAIN:-alexstuder.cloud}
+
+info "Verbinde mit Bitwarden..."
+bw logout &>/dev/null || true
+
+BW_SESSION=$(bw login "$BW_EMAIL" --passwordenv BW_PASSWORD --raw) \
+  || fail "Bitwarden Login fehlgeschlagen — E-Mail, Passwort oder OTP-Code prüfen"
+
+unset BW_PASSWORD
+
+[ -z "$BW_SESSION" ] || [ ${#BW_SESSION} -lt 20 ] \
+  && fail "Bitwarden Session ungültig — Login fehlgeschlagen"
+
+log "Bitwarden Login erfolgreich"
+
+info "Secrets aus Bitwarden holen..."
+
+BACKUP_MAIL_GPG_PASSWORD=$(bw get item "BACKUP_MAIL_GPG_PASSWORD" \
+  --session "$BW_SESSION" | jq -r '.login.password') \
+  || fail "Fehler beim Holen von BACKUP_MAIL_GPG_PASSWORD"
+
+GITHUB_MAIL_TOKEN=$(bw get item "GITHUB_MAIL_TOKEN" \
+  --session "$BW_SESSION" | jq -r '.login.password') \
+  || fail "Fehler beim Holen von GITHUB_MAIL_TOKEN"
+
+[ -z "$BACKUP_MAIL_GPG_PASSWORD" ] || [ "$BACKUP_MAIL_GPG_PASSWORD" = "null" ] \
+  && fail "BACKUP_MAIL_GPG_PASSWORD nicht in Bitwarden gefunden"
+[ -z "$GITHUB_MAIL_TOKEN" ] || [ "$GITHUB_MAIL_TOKEN" = "null" ] \
+  && fail "GITHUB_MAIL_TOKEN nicht in Bitwarden gefunden"
+
+bw lock --session "$BW_SESSION" &>/dev/null || true
+unset BW_SESSION BW_EMAIL
+
+log "GPG Passwort + GitHub Token aus Bitwarden geholt — Bitwarden gesperrt"
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 2/7 — User 'alex' anlegen..."
+
+if id "alex" &>/dev/null; then
+  warn "User 'alex' existiert bereits"
+else
+  useradd -m -s /bin/bash alex
+  log "User 'alex' angelegt"
+fi
+
+usermod -aG sudo alex
+
+echo ""
+ask "Passwort für User 'alex':"
+while true; do
+  read -s -p "  Passwort: " ALEX_PW; echo ""
+  read -s -p "  Bestätigen: " ALEX_PW2; echo ""
+  [ "$ALEX_PW" = "$ALEX_PW2" ] && break
+  warn "Stimmen nicht überein — nochmals"
+done
+echo "alex:$ALEX_PW" | chpasswd
+unset ALEX_PW ALEX_PW2
+log "User 'alex' bereit (sudo)"
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 3/7 — System + Docker + Auto-Updates installieren..."
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get -o DPkg::Lock::Timeout=600 update -y
+apt-get -o DPkg::Lock::Timeout=600 upgrade -y
+apt-get -o DPkg::Lock::Timeout=600 install -y \
+  curl git unzip jq gpg dnsutils \
+  ca-certificates gnupg \
+  lsb-release apt-transport-https \
+  software-properties-common rclone \
+  unattended-upgrades update-notifier-common
+
+if command -v docker &>/dev/null; then
+  warn "Docker bereits installiert"
+else
+  curl -fsSL https://get.docker.com | sh
+  systemctl enable docker && systemctl start docker
+  log "Docker installiert"
+fi
+
+usermod -aG docker alex
+log "User 'alex' zur docker-Gruppe hinzugefügt"
+
+cat > /etc/apt/apt.conf.d/51vps-upgrades << 'UPGRADES'
+// VPS Stack — Auto-Update Konfiguration
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}";
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+    "${distro_id}:${distro_codename}-updates";
+    "Docker:${distro_codename}";
+};
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:30";
+UPGRADES
+
+mkdir -p /etc/systemd/system/apt-daily.timer.d
+cat > /etc/systemd/system/apt-daily.timer.d/override.conf << 'TIMER'
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 03:00
+RandomizedDelaySec=0
+TIMER
+
+mkdir -p /etc/systemd/system/apt-daily-upgrade.timer.d
+cat > /etc/systemd/system/apt-daily-upgrade.timer.d/override.conf << 'TIMER'
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 03:00
+RandomizedDelaySec=0
+TIMER
+
+systemctl daemon-reload
+systemctl enable unattended-upgrades
+systemctl restart unattended-upgrades
+log "unattended-upgrades konfiguriert (täglich 03:00, Reboot 03:30)"
+log "System bereit"
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 4/7 — Repository clonen..."
+
+if [ -d "$STACK_DIR" ]; then
+  warn "$STACK_DIR existiert — wird gesichert"
+  mv "$STACK_DIR" "${STACK_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
+fi
+
+git clone "$REPO_URL" "$STACK_DIR"
+cd "$STACK_DIR"
+
+[ ! -f ".env.gpg" ] && warn ".env.gpg existiert (noch) nicht im Repo! Backup & Decrypt wird übersprungen."
+
+if [ -f ".env.gpg" ]; then
+  gpg --batch --yes \
+    --passphrase "$BACKUP_MAIL_GPG_PASSWORD" \
+    --decrypt .env.gpg > .env
+
+  if ! grep -q "^BACKUP_MAIL_GPG_PASSWORD=" "$STACK_DIR/.env"; then
+    echo "BACKUP_MAIL_GPG_PASSWORD=${BACKUP_MAIL_GPG_PASSWORD}" >> "$STACK_DIR/.env"
+  else
+    sed -i "s|^BACKUP_MAIL_GPG_PASSWORD=.*|BACKUP_MAIL_GPG_PASSWORD=${BACKUP_MAIL_GPG_PASSWORD}|" "$STACK_DIR/.env"
+  fi
+  log ".env entschlüsselt"
+else
+  info "Erstelle frische .env aus .env.template (Erstinstallation)..."
+  cp "$STACK_DIR/.env.template" "$STACK_DIR/.env"
+  if ! grep -q "^BACKUP_MAIL_GPG_PASSWORD=" "$STACK_DIR/.env"; then
+    echo "BACKUP_MAIL_GPG_PASSWORD=${BACKUP_MAIL_GPG_PASSWORD}" >> "$STACK_DIR/.env"
+  else
+    sed -i "s|^BACKUP_MAIL_GPG_PASSWORD=.*|BACKUP_MAIL_GPG_PASSWORD=${BACKUP_MAIL_GPG_PASSWORD}|" "$STACK_DIR/.env"
+  fi
+fi
+
+if [ "$MAIN_DOMAIN" != "alexstuder.cloud" ]; then
+  info "Passe Domain in .env an: alexstuder.cloud -> $MAIN_DOMAIN"
+  sed -i "s/alexstuder.cloud/${MAIN_DOMAIN}/g" "$STACK_DIR/.env"
+fi
+
+if [ -f "$STACK_DIR/bootstrap.sh" ]; then
+  chmod +x "$STACK_DIR/bootstrap.sh"
+  [ -d "$STACK_DIR/backup" ] && chmod +x "$STACK_DIR/backup/"*.sh 2>/dev/null || true
+  log "Scripts ausführbar gemacht"
+fi
+
+mkdir -p "$STACK_DIR"/{poste-data,db-data,www}
+
+cat > /etc/sudoers.d/alex-vps-stack << SUDOERS
+# sudo Passwort-Timeout: 60 Minuten
+Defaults:alex timestamp_timeout=60
+# Lesezugriff für Backup-Skripte ohne PW-Prompt
+alex ALL=(root) NOPASSWD: /bin/tar -czpf * -C ${STACK_DIR}/poste-data .
+alex ALL=(root) NOPASSWD: /bin/tar -czpf * -C ${STACK_DIR}/db-data .
+SUDOERS
+chmod 440 /etc/sudoers.d/alex-vps-stack
+log "sudoers konfiguriert (Lesezugriff für Backups)"
+
+# Rclone Konfiguration für Cloudflare R2
+source "$STACK_DIR/.env" 2>/dev/null || true
+if [ -n "$CF_R2_ACCESS_KEY" ]; then
+  mkdir -p "$STACK_DIR/rclone"
+  cat > "$STACK_DIR/rclone/rclone.conf" << RCLONE
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = ${CF_R2_ACCESS_KEY}
+secret_access_key = ${CF_R2_SECRET_KEY}
+endpoint = ${CF_R2_ENDPOINT}
+acl = private
+RCLONE
+  log "Rclone Config generiert"
+fi
+
+chown -R alex:alex "$STACK_DIR" || true
+
+sudo -u alex git -C "$STACK_DIR" remote set-url origin \
+  "https://${GITHUB_MAIL_TOKEN}@github.com/Alexstuder/MailAndWebServerVPSBootstraper.git"
+sudo -u alex git -C "$STACK_DIR" config user.name "Alexstuder"
+sudo -u alex git -C "$STACK_DIR" config user.email "alex@alexstuder.ch"
+unset GITHUB_MAIL_TOKEN
+
+log "Repository geclont und konfiguriert"
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 5/7 — Backup von R2 wiederherstellen..."
+
+BACKUP_RESTORED=false
+
+if [ -f "$STACK_DIR/rclone/rclone.conf" ]; then
+  LATEST=$(rclone ls "r2:${CF_R2_BUCKET}/backups/" \
+    --config "$STACK_DIR/rclone/rclone.conf" 2>/dev/null \
+    | sort | tail -1 | awk '{print $2}')
+
+  if [ -n "$LATEST" ]; then
+    info "Backup gefunden: $LATEST"
+    rclone copy "r2:${CF_R2_BUCKET}/backups/$LATEST" /tmp/ \
+      --config "$STACK_DIR/rclone/rclone.conf"
+
+    STAGING="/tmp/vps-restore-staging"
+    rm -rf "$STAGING" && mkdir -p "$STAGING"
+
+    gpg --batch --yes \
+      --passphrase "$BACKUP_MAIL_GPG_PASSWORD" \
+      --decrypt "/tmp/$LATEST" \
+      | tar -xzp -C "$STAGING/"
+
+    rm -f "/tmp/$LATEST"
+
+    if [ -d "$STAGING/poste-data/" ]; then
+      mkdir -p "$STACK_DIR/poste-data"
+      cp -rp "$STAGING/poste-data/." "$STACK_DIR/poste-data/"
+      BACKUP_RESTORED=true
+      log "Poste.io Backup wiederhergestellt"
+    fi
+
+    if [ -d "$STAGING/db-data/" ]; then
+      mkdir -p "$STACK_DIR/db-data"
+      cp -rp "$STAGING/db-data/." "$STACK_DIR/db-data/"
+      log "Supabase (PostgreSQL) Backup wiederhergestellt"
+    fi
+
+    if [ -d "$STAGING/www/" ]; then
+      mkdir -p "$STACK_DIR/www"
+      cp -rp "$STAGING/www/." "$STACK_DIR/www/"
+      log "WWW / Flutter App Backup wiederhergestellt"
+    fi
+
+    rm -rf "$STAGING"
+    log "Backup vollständig wiederhergestellt aus: $LATEST"
+  else
+    warn "Kein Backup gefunden — frischer Start"
+  fi
+else
+  warn "Keine Rclone Config vorhanden — verpasse Cloudflare Vars in .env?"
+fi
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 6/7 — DNS Validierung & Stack Start..."
+
+source "$STACK_DIR/.env" 2>/dev/null || true
+
+info "Prüfe DNS-Einträge für ${MAIN_DOMAIN}..."
+VPS_IP=$(curl -s https://api.ipify.org || echo "Unbekannt")
+log "Aktuelle VPS-IP: $VPS_IP"
+
+# Hilfsfunktion für Cloudflare API
+update_cf_dns() {
+  local type=$1
+  local name=$2
+  local content=$3
+  local proxied=${4:-false}
+  local priority=$5
+
+  if [ -z "$CF_API_TOKEN" ] || [ -z "$CF_ZONE_ID" ]; then
+    warn "Konnte DNS-Eintrag für $name nicht updaten: CF_API_TOKEN oder CF_ZONE_ID in .env fehlen."
+    return
+  fi
+
+  local full_name="${name}.$MAIN_DOMAIN"
+  [ "$name" = "@" ] && full_name="$MAIN_DOMAIN"
+
+  local response
+  response=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${full_name}&type=${type}" \
+    -H "Authorization: Bearer $CF_API_TOKEN" \
+    -H "Content-Type: application/json")
+  
+  local record_id=$(echo "$response" | jq -r '.result[0].id // empty')
+  
+  local data="{\"type\":\"$type\",\"name\":\"$full_name\",\"content\":\"$content\",\"proxied\":$proxied}"
+  [ -n "$priority" ] && data="{\"type\":\"$type\",\"name\":\"$full_name\",\"content\":\"$content\",\"proxied\":$proxied,\"priority\":$priority}"
+
+  if [ -n "$record_id" ]; then
+    info "Aktualisiere $type-Record für $full_name auf $content (Proxied: $proxied)..."
+    curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/$record_id" \
+      -H "Authorization: Bearer $CF_API_TOKEN" \
+      -H "Content-Type: application/json" \
+      --data "$data" >/dev/null
+    log "Cloudflare $type-Record (ID: $record_id) erfolgreich aktualisiert!"
+  else
+    info "Erstelle neuen $type-Record für $full_name auf $content (Proxied: $proxied)..."
+    curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+      -H "Authorization: Bearer $CF_API_TOKEN" \
+      -H "Content-Type: application/json" \
+      --data "$data" >/dev/null
+    log "Cloudflare $type-Record erfolgreich erstellt!"
+  fi
+}
+
+if command -v dig &>/dev/null; then
+  # 1) Mail A-Record
+  MAIL_IP=$(dig +short "mail.$MAIN_DOMAIN" | tail -n1)
+  if [ "$MAIL_IP" != "$VPS_IP" ]; then
+    warn "🚨 DNS: 'mail.$MAIN_DOMAIN' zeigt nicht auf diesen Server! (Soll: $VPS_IP | Ist: ${MAIL_IP:-Nichts})"
+    info "Versuche via Cloudflare API zu korrigieren..."
+    update_cf_dns "A" "mail" "$VPS_IP" false
+  else
+    log "[OK] DNS: 'mail.$MAIN_DOMAIN' zeigt auf $VPS_IP"
+  fi
+
+  # 2) SSH A-Record
+  SSH_IP=$(dig +short "ssh.$MAIN_DOMAIN" | tail -n1)
+  if [ "$SSH_IP" != "$VPS_IP" ]; then
+    warn "🚨 DNS: 'ssh.$MAIN_DOMAIN' zeigt nicht auf Server! (Soll: $VPS_IP | Ist: ${SSH_IP:-Nichts})"
+    info "Versuche via Cloudflare API zu korrigieren..."
+    update_cf_dns "A" "ssh" "$VPS_IP" false
+  else
+    log "[OK] DNS: 'ssh.$MAIN_DOMAIN' zeigt auf $VPS_IP"
+  fi
+
+  # 3) MX Record
+  MX_RECORD=$(dig +short MX "$MAIN_DOMAIN" | grep "mail.$MAIN_DOMAIN" || true)
+  if [ -z "$MX_RECORD" ]; then
+    warn "🚨 DNS: MX-Record fehlt oder ist falsch!"
+    info "Versuche via Cloudflare API zu korrigieren..."
+    update_cf_dns "MX" "@" "mail.$MAIN_DOMAIN" false 10
+  else
+    log "[OK] DNS: MX-Record zeigt auf mail.$MAIN_DOMAIN"
+  fi
+  echo ""
+fi
+
+cd "$STACK_DIR"
+if [ -f "docker-compose.yml" ]; then
+  source "$STACK_DIR/.env" 2>/dev/null || true
+  if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+    warn ""
+    warn "WICHTIG: Das ist die Erstinstallation. Die Umgebungsvariablen (.env) fehlen noch!"
+    warn "Ein Start von 'docker-compose' würde jetzt crashen."
+    warn ""
+    warn "  ➔ 1. Logge dich nach dem Abschluss dieses Skripts als 'alex' ein."
+    warn "  ➔ 2. Wechsle ins Verzeichnis: cd $STACK_DIR"
+    warn "  ➔ 3. Führe aus: ./set-secret.sh (und hinterlege deine Keys/Passwörter)"
+    warn "  ➔ 4. Führe danach aus: docker compose up -d"
+    warn ""
+  else
+    docker compose pull
+    docker compose up -d
+    sleep 10
+    docker compose ps
+    log "Docker Stack erfolgreich gestartet"
+  fi
+else
+  warn "Keine docker-compose.yml vorhanden, überspringe Stack-Start."
+fi
+
+# ── Portainer Admin via API einrichten ─────────────────────────────────
+if [ -n "$PORTAINER_ADMIN_PASSWORD" ]; then
+  info "Portainer Admin-Passwort setzen..."
+  PORTAINER_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' portainer 2>/dev/null || echo "")
+
+  if [ -n "$PORTAINER_IP" ]; then
+    for i in $(seq 1 12); do
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "http://${PORTAINER_IP}:9000/api/system/status" 2>/dev/null || echo "000")
+      if [ "$HTTP_CODE" = "200" ]; then
+        break
+      fi
+      sleep 5
+    done
+    INIT_RESPONSE=$(curl -s -X POST "http://${PORTAINER_IP}:9000/api/users/admin/init" \
+      -H "Content-Type: application/json" \
+      -d "{\"Username\":\"admin\",\"Password\":\"${PORTAINER_ADMIN_PASSWORD}\"}") 
+    if echo "$INIT_RESPONSE" | grep -q "jwt"; then
+      log "Portainer Admin-User 'admin' eingerichtet"
+    fi
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────
+info "Schritt 7/7 — Cron + Firewall..."
+
+(crontab -u alex -l 2>/dev/null; \
+  echo "0 2 * * * bash /home/alex/vps-stack/backup/backup-master.sh >> /home/alex/vps-stack/backup/backup.log 2>&1") \
+  | crontab -u alex -
+log "Backup-Cron eingerichtet (täglich 02:00)"
+
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow ssh
+ufw --force enable
+log "Firewall (UFW) konfiguriert (nur eingehendes SSH erlaubt)"
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║ Installation abgeschlossen!              ║"
+echo "║ ${BOOTSTRAP_VERSION}                              ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+echo "  Stack: $STACK_DIR"
+echo "  User:  alex (sudo, docker)"
+echo ""
+echo "  Zeitplan (UTC):"
+echo "    02:00 — Backup → R2 + Status-Mail"
+echo "    02:30 — Watchtower → Container-Updates"
+echo "    03:00 — unattended-upgrades → System + Docker Engine"
+echo "    03:30 — Automatischer Neustart (falls Kernel-Update)"
+echo ""
+echo "  HINWEIS: Bitte per SSH als User 'alex' neu anmelden,"
+echo "           damit die Docker-Rechte (usermod) aktiv werden:"
+echo "           su - alex"
+echo ""
