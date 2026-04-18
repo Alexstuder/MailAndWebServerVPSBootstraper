@@ -29,9 +29,12 @@ services:
     environment:
       - TZ=Europe/Zurich
       - HTTPS=OFF
+    tmpfs:
+      - /var/lib/rspamd
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./poste-data:/data
+      - ./poste-config/worker-controller.inc:/etc/rspamd/local.d/worker-controller.inc:ro
     networks:
       - vps-net
 
