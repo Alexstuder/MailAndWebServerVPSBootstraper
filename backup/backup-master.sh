@@ -115,7 +115,7 @@ info "Bereinige alte Backups (Rotation 7 Dailies / 4 Weeklies)..."
 # Dailies rotieren (7 behalten)
 NORMAL_BACKUPS=$(rclone ls "r2:${CF_R2_BUCKET}/backups/" \
   --config "$STACK_DIR/rclone/rclone.conf" \
-  | sort | awk '{print $2}' | grep -v 'WEEKLY' || true)
+  | awk '{print $2}' | sort | grep -v 'WEEKLY' || true)
 COUNT=$(echo "$NORMAL_BACKUPS" | grep -v '^[[:space:]]*$' | wc -l || echo 0)
 if [ "$COUNT" -gt 7 ]; then
   TO_DELETE=$(echo "$NORMAL_BACKUPS" | head -n $((COUNT - 7)))
@@ -128,7 +128,7 @@ fi
 # Weeklies rotieren (4 behalten)
 WEEKLY_BACKUPS=$(rclone ls "r2:${CF_R2_BUCKET}/backups/" \
   --config "$STACK_DIR/rclone/rclone.conf" \
-  | sort | awk '{print $2}' | grep 'WEEKLY' || true)
+  | awk '{print $2}' | sort | grep 'WEEKLY' || true)
 COUNT=$(echo "$WEEKLY_BACKUPS" | grep -v '^[[:space:]]*$' | wc -l || echo 0)
 if [ "$COUNT" -gt 4 ]; then
   TO_DELETE=$(echo "$WEEKLY_BACKUPS" | head -n $((COUNT - 4)))
