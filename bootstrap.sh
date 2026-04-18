@@ -514,12 +514,58 @@ if [ -n "$PORTAINER_ADMIN_PASSWORD" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────
-info "Schritt 7/8 — Cron + Firewall..."
+info "Schritt 7/8 — Cron + Firewall + LetsEncrypt..."
 
 (crontab -u alex -l 2>/dev/null; \
   echo "0 2 * * * bash /home/alex/vps-stack/backup/backup-master.sh >> /home/alex/vps-stack/backup/backup.log 2>&1") \
   | crontab -u alex -
 log "Backup-Cron eingerichtet (täglich 02:00)"
+
+# LetsEncrypt-Zertifikat für mail.MAIL_DOMAIN
+source "$STACK_DIR/.env" 2>/dev/null || true
+if [ -n "$CF_API_TOKEN" ] && [ -n "$MAIL_DOMAIN" ]; then
+  # certbot + Cloudflare-Plugin installieren
+  apt-get install -y -qq certbot python3-certbot-dns-cloudflare
+
+  # Cloudflare-Credentials
+  CF_INI="/root/.cloudflare-certbot.ini"
+  echo "dns_cloudflare_api_token = ${CF_API_TOKEN}" > "$CF_INI"
+  chmod 600 "$CF_INI"
+
+  # Zertifikat holen (idempotent — certbot überspringt wenn noch gültig)
+  certbot certonly \
+    --dns-cloudflare \
+    --dns-cloudflare-credentials "$CF_INI" \
+    --dns-cloudflare-propagation-seconds 30 \
+    -d "mail.${MAIL_DOMAIN}" \
+    --email "admin@${MAIL_DOMAIN}" \
+    --agree-tos \
+    --non-interactive \
+    --keep-until-expiring \
+    2>&1 | grep -E 'Certificate|error|Saving|Success' || true
+
+  # Deploy-Hook: Cert nach Renewal in poste.io einspielen
+  ln -sf "$STACK_DIR/backup/renew-mail-cert.sh" \
+    /etc/letsencrypt/renewal-hooks/deploy/mail-posteio.sh
+
+  # Cert sofort in poste.io installieren (falls neu ausgestellt)
+  if [ -f "/etc/letsencrypt/live/mail.${MAIL_DOMAIN}/fullchain.pem" ]; then
+    cp "/etc/letsencrypt/live/mail.${MAIL_DOMAIN}/fullchain.pem" /tmp/mail-fullchain.pem
+    cp "/etc/letsencrypt/live/mail.${MAIL_DOMAIN}/privkey.pem" /tmp/mail-privkey.pem
+    chmod 644 /tmp/mail-fullchain.pem /tmp/mail-privkey.pem
+    docker cp /tmp/mail-fullchain.pem posteio:/etc/ssl/server-combined.crt
+    docker cp /tmp/mail-privkey.pem posteio:/etc/ssl/server.key
+    docker restart posteio >/dev/null 2>&1 || true
+    log "LetsEncrypt-Cert in posteio installiert"
+  fi
+
+  # Cron: Renewal alle 30 Tage (root)
+  RENEW_CRON="0 3 1 * * certbot renew --quiet 2>&1 | logger -t certbot-renew"
+  ( crontab -l 2>/dev/null | grep -v 'certbot renew'; echo "$RENEW_CRON" ) | crontab -
+  log "LetsEncrypt-Renewal-Cron eingerichtet (monatlich 03:00)"
+else
+  warn "CF_API_TOKEN oder MAIL_DOMAIN fehlt — LetsEncrypt übersprungen"
+fi
 
 ufw default deny incoming
 ufw default allow outgoing
@@ -602,6 +648,10 @@ echo "    03:00 — unattended-upgrades → System + Docker Engine"
 echo "    03:30 — Automatischer Neustart (falls Kernel-Update)"
 echo ""
 echo "  Claude Code: 'claude' im Terminal (als User alex)"
+echo ""
+echo "  iPhone Mail-Setup (Profil öffnen im Safari):"
+source "$STACK_DIR/.env" 2>/dev/null || true
+echo "  https://www.${WEB_DOMAIN:-www.${MAIL_DOMAIN}}/mail-setup.mobileconfig"
 echo ""
 echo "  HINWEIS: Bitte per SSH als User 'alex' neu anmelden,"
 echo "           damit die Docker-Rechte (usermod) aktiv werden:"

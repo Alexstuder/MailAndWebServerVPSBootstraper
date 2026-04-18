@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>EmailAccountDescription</key>
+      <string>alex@alexstuder.cloud</string>
+      <key>EmailAccountName</key>
+      <string>Alex Studer</string>
+      <key>EmailAccountType</key>
+      <string>EmailTypeIMAP</string>
+      <key>EmailAddress</key>
+      <string>alex@alexstuder.cloud</string>
+      <key>IncomingMailServerHostName</key>
+      <string>mail.alexstuder.cloud</string>
+      <key>IncomingMailServerPortNumber</key>
+      <integer>993</integer>
+      <key>IncomingMailServerUseSSL</key>
+      <true/>
+      <key>IncomingMailServerUsername</key>
+      <string>alex@alexstuder.cloud</string>
+      <key>OutgoingMailServerHostName</key>
+      <string>mail.alexstuder.cloud</string>
+      <key>OutgoingMailServerPortNumber</key>
+      <integer>587</integer>
+      <key>OutgoingMailServerUseSSL</key>
+      <false/>
+      <key>OutgoingMailServerUsername</key>
+      <string>alex@alexstuder.cloud</string>
+      <key>PayloadDescription</key>
+      <string>Mail-Konto alex@alexstuder.cloud</string>
+      <key>PayloadDisplayName</key>
+      <string>alexstuder.cloud Mail</string>
+      <key>PayloadIdentifier</key>
+      <string>cloud.alexstuder.mail.alex</string>
+      <key>PayloadType</key>
+      <string>com.apple.mail.managed</string>
+      <key>PayloadUUID</key>
+      <string>4A3B2C1D-5E6F-7A8B-9C0D-E1F2A3B4C5D6</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>SMIMEEnabled</key>
+      <false/>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>Konfiguriert alex@alexstuder.cloud auf diesem Gerät</string>
+  <key>PayloadDisplayName</key>
+  <string>alexstuder.cloud Mail</string>
+  <key>PayloadIdentifier</key>
+  <string>cloud.alexstuder.mailprofile</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>1A2B3C4D-5E6F-7A8B-9C0D-E1F2A3B4C5D6</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>

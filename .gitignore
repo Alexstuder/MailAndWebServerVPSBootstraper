@@ -11,6 +11,7 @@ db-data/
 portainer-data/
 www/*
 !www/index.html
+!www/mail-setup.mobileconfig
 
 # OS/System
 .DS_Store
