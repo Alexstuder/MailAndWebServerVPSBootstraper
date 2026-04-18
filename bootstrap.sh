@@ -525,8 +525,13 @@ log "Backup-Cron eingerichtet (täglich 02:00)"
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow ssh
+ufw allow 25/tcp    # SMTP (eingehende Mails)
+ufw allow 465/tcp   # SMTPS
+ufw allow 587/tcp   # Submission (Brevo Relay / Clients)
+ufw allow 143/tcp   # IMAP
+ufw allow 993/tcp   # IMAPs
 ufw --force enable
-log "Firewall (UFW) konfiguriert (nur eingehendes SSH erlaubt)"
+log "Firewall (UFW) konfiguriert (SSH + Mail-Ports)"
 
 # ─────────────────────────────────────────────────────────────
 info "Schritt 8/8 — Claude Code installieren..."
