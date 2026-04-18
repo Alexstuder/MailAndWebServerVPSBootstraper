@@ -619,6 +619,9 @@ else
   log "Node.js $(node -v) bereits vorhanden — OK"
 fi
 
+# npm selbst aktualisieren (vermeidet "new major version" Notice)
+npm install -g npm@latest --quiet
+
 # Claude Code global installieren / aktualisieren
 if command -v claude &>/dev/null; then
   info "Claude Code bereits installiert — aktualisiere..."
@@ -673,7 +676,7 @@ echo "  Claude Code: 'claude' im Terminal (als User alex)"
 echo ""
 echo "  iPhone Mail-Setup (Profil öffnen im Safari):"
 source "$STACK_DIR/.env" 2>/dev/null || true
-echo "  https://www.${WEB_DOMAIN:-www.${MAIL_DOMAIN}}/mail-setup.mobileconfig"
+echo "  https://${WEB_DOMAIN:-www.${MAIL_DOMAIN}}/mail-setup.mobileconfig"
 echo ""
 echo "  HINWEIS: Bitte per SSH als User 'alex' neu anmelden,"
 echo "           damit die Docker-Rechte (usermod) aktiv werden:"
